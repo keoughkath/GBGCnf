@@ -1,0 +1,11 @@
+har_path: "hars.bed"
+maf_path: "mafs"
+outdir: "outputs"
+flank_size: "50"
+genome_file: "GRCh38_EBV.chrom.sizes"
+synteny_filter_path: "chain_bed_files/"
+ar_filters_path: "filters.sorted.bed.gz"
+neutral_model_autosomes: "neutral_model.mod"
+phast_path: "tools/phast_git/phast/bin"
+species_list: "list_species.txt"
+dataset: "zoonomia" # specifies which version of GBGC scripts to use to avoid species name error, UCSC or zoonomia
