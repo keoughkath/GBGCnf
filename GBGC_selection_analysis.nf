@@ -5,7 +5,9 @@ VERSION = "0.0.0"
 // parse inputs
 
 initHarFile = file(params.har_path)
-syntenyFiles = Channel.fromPath( "${params.synteny_filter_path}*.bed" )
+dogSyntenyFile = file(params.dog_synteny_file)
+mouseSyntenyFile = file(params.mouse_synteny_file)
+rhesusSyntenyFile = file(params.rhesus_synteny_file)
 arFilterFile = file(params.ar_filters_path)
 
 /*
@@ -41,7 +43,7 @@ harsByChunk.into { harsByChunk1; harsByChunk2 }
 */
 
 process extractHarMsa {
-	tag "Extracting MSA for HAR"
+	tag "Extracting MSA for HAR ${chunk}"
 
 	// publishDir params.outdir, mode: "copy", overwrite: false
 
@@ -62,37 +64,13 @@ process extractHarMsa {
 
 }
 
-/*
-* split flanking HAR BEDs to one BED file per region
-*/
-
-process splitHarBed {
-	tag "Splitting flanking regions to 1 per region"
-
-	// publishDir params.outdir, mode: "copy", overwrite: false
-
-	errorStrategy 'retry'
-	maxRetries 3
-
-	input:
-	file(har_flank_bed) from harsByChunk2.flatten()
-
-	output:
-	file('har_beds_sep/*.bed') into harBedsSep
-
-	script:
-	"""
-	mkdir -p har_beds_sep
-	python ${baseDir}/bin/splitHarFlanks.py ${har_flank_bed} har_beds_sep
-	"""
-}
 
 /*
 * filter HAR flanking regions
 */
 
 process getHarFlankingRegions {
-	tag "Filter HAR flanking regions"
+	tag "Filter HAR ${chunk} flanking regions"
 
 	// publishDir params.outdir, mode: "copy", overwrite: false
 
@@ -100,8 +78,7 @@ process getHarFlankingRegions {
 	maxRetries 3
 
 	input:
-	file(har_bed) from harBedsSep.flatten()
-	file(synteny_file_list) from syntenyFiles.collect()
+	file(har_bed) from harsByChunk2.flatten()
 	file(ar_filters) from arFilterFile
 
 	output: 
@@ -111,7 +88,7 @@ process getHarFlankingRegions {
 	chunk = har_bed.baseName
 	"""
 	mkdir -p har_flanking_beds
-	bedtools slop -i ${har_bed} -b ${params.flank_size} -g ${params.genome_file} | bedops -i - ${synteny_file_list} | bedtools subtract -a - -b ${ar_filters} | bedtools sort -i - | bedtools merge -d 0 -i - > har_flanking_beds/${chunk}.bed
+	bedtools slop -i ${har_bed} -b ${params.flank_size} -g ${params.genome_file} | bedtools intersect -a - -b ${dogSyntenyFile} | bedtools intersect -a - -b ${mouseSyntenyFile} | bedtools intersect -a - -b ${rhesusSyntenyFile} | bedtools subtract -a - -b ${ar_filters} | bedtools sort -i - > har_flanking_beds/${chunk}.bed
 	"""
 }
 
@@ -120,7 +97,7 @@ process getHarFlankingRegions {
 */
 
 process extractHarFlanks {
-	tag "Extracting MSA for HAR flanking region"
+	tag "Extracting MSA for HAR ${chunk} flanking region"
 
 	// publishDir params.outdir, mode: "copy", overwrite: false
 
@@ -131,15 +108,18 @@ process extractHarFlanks {
 	file(har_flank_bed) from harFlankBeds.flatten()
 
 	output:
-	file('har_flank_msas/*.maf') into harFlankMafs
+	file('har_flanking_mafs/*.maf') into harFlankMafs
 
 	script:
-	chunk_w_har = har_flank_bed.baseName
-	chunk = har_flank_bed.name.split(/\.\d+\.bed/)[0]
-	har = chunk_w_har.split('\\.')[3]
+	chunk = har_flank_bed.baseName
 	"""
-	mkdir -p har_flank_msas
-	mafsInRegion ${har_flank_bed} har_flank_msas/${har}.maf ${params.maf_path}/${chunk}.maf.gz
+	mkdir -p har_flanking_mafs_prelim
+	mkdir -p har_flanking_mafs
+
+	vals=\$(cut -f 4 ${har_flank_bed} | sort | uniq)
+
+	for val in \${vals[@]}; do grep \${val}'\$' ${har_flank_bed} > \${val}.bed; done
+	for val in \${vals[@]}; do mafsInRegion \${val}.bed har_flanking_mafs_prelim/\${val}.prelim.maf ${params.maf_path}/${chunk}.maf.gz; grep -v 'null' har_flanking_mafs_prelim/\${val}.prelim.maf > har_flanking_mafs/\${val}.maf; done
 	"""
 
 }
@@ -154,7 +134,7 @@ harFlankMafs.into { harFlankMafsOne; harFlankMafsTwo }
 process convertHARmafToSS {
 	tag "Convert HAR MAFs to SS files"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -180,7 +160,7 @@ process convertHARmafToSS {
 process convertHARflankMafToSS {
 	tag "Convert HAR-flank MAFs to SS files"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -219,7 +199,7 @@ harWithFlank = harWithName.combine(harFlankWithName, by: 0)
 process getMatchingSpecies {
 	tag "Getting intersection of species HAR vs. flank"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -258,7 +238,7 @@ harMafFlankWithSpecies = harMafFlankWithName.combine(harSpeciesWithNameTwo, by: 
 process filterMatchingSpeciesHars {
 	tag "Filtering HAR MAFs for matched species"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -278,7 +258,7 @@ process filterMatchingSpeciesHars {
 process filterMatchingSpeciesFlanks {
 	tag "Filtering HAR-flanking MAFs for matched species"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -298,7 +278,7 @@ process filterMatchingSpeciesFlanks {
 process convertHarMSmafSS {
 	tag "Convert HAR species-matched MAFs to SS files"
 
-	publishDir params.outdir, mode: "copy", overwrite: false
+	publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -320,7 +300,7 @@ process convertHarMSmafSS {
 process convertHarFlankMSmafSS {
 	tag "Convert HAR flank species-matched MAFs to SS files"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	// publishDir params.outdir, mode: "copy", overwrite: true
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -350,9 +330,9 @@ harWithFlankSpeciesMatched = harSSSpeciesMatched.combine(harFlankSSSpeciesMatche
 process selectionAnalysisAutosomes {
 	tag "Performing selection analysis"
 
-	publishDir params.outdir, mode: "copy", overwrite: false
+	publishDir params.outdir, mode: "copy", overwrite: true
 
-	errorStrategy 'retry'
+	errorStrategy 'ignore'
 	maxRetries 3
 
 	input:
@@ -365,6 +345,7 @@ process selectionAnalysisAutosomes {
 	"""
 	mkdir -p selection_results 
 	cp ${baseDir}/bin/${params.dataset}/* .
+	touch /wynton/home/pollard/kathleen/miniconda3/envs/gbgc/lib/R/etc/ldpaths
 	Rscript BGC_LRT_new.R ${params.neutral_model_autosomes} ${har_ss} ${har_flank_ss} ${params.species_list} selection_results/HAR${har}.csv
 	"""
 }
