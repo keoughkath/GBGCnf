@@ -1,4 +1,4 @@
-VERSION = "0.0.0"
+VERSION = "0.0.1"
 
 // Only using for autosomal HARs at the moment.
 
@@ -17,7 +17,7 @@ arFilterFile = file(params.ar_filters_path)
 process splitHars {
 	tag "Splitting up HARs by region"
 
-	// publishDir params.outdir, mode: "copy", overwrite: false
+	publishDir params.outdir, mode: "copy", overwrite: false
 
 	errorStrategy 'retry'
 	maxRetries 3
@@ -36,7 +36,7 @@ process splitHars {
 	
 }
 
-harsByChunk.into { harsByChunk1; harsByChunk2 }
+harsByChunk.filter{ it.size()>0 }.into { harsByChunk1; harsByChunk2 }
 
 /*
 * extract MSAs per HAR
@@ -51,7 +51,7 @@ process extractHarMsa {
 	maxRetries 3
 
 	input: 
-	file(har_bed) from harsByChunk1.flatten()
+	file(har_bed) from harsByChunk1.filter{ it.size()>0 }.flatten()
 
 	output:
 	file('har_msas/*.maf') into harMafs
@@ -78,7 +78,7 @@ process getHarFlankingRegions {
 	maxRetries 3
 
 	input:
-	file(har_bed) from harsByChunk2.flatten()
+	file(har_bed) from harsByChunk2.filter{ it.size()>0 }.flatten()
 	file(ar_filters) from arFilterFile
 
 	output: 
@@ -105,7 +105,7 @@ process extractHarFlanks {
 	maxRetries 3
 
 	input: 
-	file(har_flank_bed) from harFlankBeds.flatten()
+	file(har_flank_bed) from harFlankBeds.filter{ it.size()>0 }.flatten()
 
 	output:
 	file('har_flanking_mafs/*.maf') into harFlankMafs
@@ -332,7 +332,7 @@ process selectionAnalysisAutosomes {
 
 	publishDir params.outdir, mode: "copy", overwrite: true
 
-	errorStrategy 'ignore'
+	errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
 	maxRetries 3
 
 	input:
